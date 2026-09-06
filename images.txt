@@ -19,13 +19,13 @@
 # ---- 加速器拉不到、必须走这里的 ----
 mysql:8.4
 
-# ---- 下面这些先注释，验证通了再分批放开 ----
+# ---- 中间件 ----
+redis:7
+nacos/nacos-server:v2.4.3
+
+# ---- 下一批再放开（JDK 镜像较大，单独跑一次）----
 # eclipse-temurin:21-jdk
 # eclipse-temurin:21-jre
-
-# ---- 中间件 ----
-# redis:7
-# nacos/nacos-server:v2.4.3
 # rabbitmq:3.13-management
 
 # ---- k8s 生态 ----
