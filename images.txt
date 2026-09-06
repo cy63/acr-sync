@@ -13,18 +13,23 @@
 #
 # 改完这个文件 push 上去，Actions 会自动同步。# 开头的行和空行会被忽略。
 
+# ⚠️ 跨境推送每个镜像约十几分钟，而 job 超时是 60 分钟。
+#    一次别放太多，超过 3~4 个就分批提交。
+
 # ---- 加速器拉不到、必须走这里的 ----
 mysql:8.4
-eclipse-temurin:21-jdk
-eclipse-temurin:21-jre
+
+# ---- 下面这些先注释，验证通了再分批放开 ----
+# eclipse-temurin:21-jdk
+# eclipse-temurin:21-jre
 
 # ---- 中间件 ----
-redis:7
-nacos/nacos-server:v2.4.3
-rabbitmq:3.13-management
+# redis:7
+# nacos/nacos-server:v2.4.3
+# rabbitmq:3.13-management
 
 # ---- k8s 生态 ----
-rancher/local-path-provisioner:v0.0.37
+# rancher/local-path-provisioner:v0.0.37
 
 # ---- 示例：自定义 tag ----
 # registry.k8s.io/metrics-server/metrics-server:v0.7.2   metrics-server-v0.7.2
