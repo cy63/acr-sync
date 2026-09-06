@@ -49,6 +49,17 @@ bladex/sentinel-dashboard:1.8.8
 eclipse-temurin:21-jdk
 eclipse-temurin:21-jre
 
+# ---- CI ----
+# 控制器。固定版本而不用 lts-jdk21 浮动标签，避免每次同步都拉到不同镜像
+jenkins/jenkins:2.568.3-lts-jdk21
+# 动态构建节点，Kubernetes 插件按需拉起。原 tag 太长，第二列自定义一个短的
+jenkins/inbound-agent:3391.va_37fa_a_305d6d-1-jdk21   inbound-agent-jdk21
+# 构建 Java 项目用
+maven:3.9-eclipse-temurin-21
+# 在 k8s 里构建镜像。containerd 没有 docker socket，
+# kaniko 已停止维护，用 buildkit
+moby/buildkit:v0.18.2-rootless
+
 # ---- 可选，需要时取消注释 ----
 # docker.elastic.co/kibana/kibana:8.15.3
 # rancher/local-path-provisioner:v0.0.37
