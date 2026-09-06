@@ -1,17 +1,20 @@
-# 把 Docker Hub / registry.k8s.io / ghcr.io 上的镜像同步到自己的阿里云 ACR
+# 把 Docker Hub / registry.k8s.io / docker.elastic.co 等公共仓库的镜像同步到自己的阿里云 ACR
 #
 # 为什么需要它：
-#   阿里云的镜像加速器只覆盖 Docker Hub 的一个子集（mysql:8.4、eclipse-temurin 等都没有）。
-#   GitHub 的 runner 直连 Docker Hub，没有覆盖问题，是唯一能同步任意镜像的办法。
+#   阿里云的镜像加速器只覆盖 Docker Hub 的一个子集（mysql:8.4、eclipse-temurin 等
+#   都返回 not found）。GitHub 的 runner 直连各大仓库，没有覆盖问题。
+#
+# 为什么用矩阵并行：
+#   跨境推送每个镜像要十几分钟。串行跑 8 个镜像会超过两小时，还会撞上 job 超时。
+#   矩阵让每个镜像成为独立 job 并行执行，总耗时 = 最慢的那一个，而不是全部之和。
+#   而且哪个镜像失败在 UI 上一目了然，重跑也只重跑失败的那个。
 name: sync-images
 
 on:
-  # ① 改了 images.txt 就自动跑
   push:
     paths:
       - 'images.txt'
       - '.github/workflows/sync-images.yml'
-  # ② 也可以在 Actions 页面手动触发，临时同步单个镜像
   workflow_dispatch:
     inputs:
       image:
@@ -19,29 +22,70 @@ on:
         required: false
         default: ''
 
-# 同一时间只跑一个，避免两次 push 撞车重复推送
 concurrency:
   group: sync-images
   cancel-in-progress: false
 
 jobs:
-  sync:
+  # ── 第一步：把 images.txt 读成 JSON 数组，供矩阵展开 ────────────────
+  prepare:
     runs-on: ubuntu-latest
-    # 跨境推送慢，但真卡死时不该空跑 6 小时（GitHub 默认上限）
-    timeout-minutes: 60
+    outputs:
+      images: ${{ steps.list.outputs.images }}
+      count:  ${{ steps.list.outputs.count }}
     steps:
       - uses: actions/checkout@v5
 
-      # skopeo 不预装在 runner 上，需要自己装（约 15 秒）
-      # 用 skopeo 而不是 docker：它直接搬运 blob，不需要先解压到本地磁盘，快很多
+      - id: list
+        env:
+          # 经环境变量传入，不直接内插到 shell 里 —— 避免手动输入被当成命令执行
+          ONLY_IMAGE: ${{ github.event.inputs.image }}
+        run: |
+          set -euo pipefail
+          if [ -n "${ONLY_IMAGE}" ]; then
+            LIST="${ONLY_IMAGE}"
+          else
+            # 去掉注释行和空行
+            LIST=$(grep -vE '^[[:space:]]*(#|$)' images.txt || true)
+          fi
+
+          if [ -z "${LIST}" ]; then
+            echo "images.txt 里没有任何镜像"
+            echo 'images=[]' >> "$GITHUB_OUTPUT"
+            echo 'count=0'   >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          # jq -R 逐行读成字符串，-s 合并成数组，-c 输出单行 JSON
+          JSON=$(printf '%s\n' "${LIST}" | jq -R -s -c 'split("\n") | map(select(length > 0))')
+          echo "images=${JSON}" >> "$GITHUB_OUTPUT"
+          echo "count=$(printf '%s\n' "${LIST}" | wc -l)" >> "$GITHUB_OUTPUT"
+          echo "将同步 $(printf '%s\n' "${LIST}" | wc -l) 个镜像："
+          printf '%s\n' "${LIST}"
+
+  # ── 第二步：每个镜像一个 job，并行同步 ──────────────────────────────
+  sync:
+    needs: prepare
+    if: needs.prepare.outputs.count != '0'
+    runs-on: ubuntu-latest
+    # 跨境推送慢，但单个镜像不该超过一小时；真卡死时不空跑满 6 小时默认上限
+    timeout-minutes: 60
+    strategy:
+      # 一个镜像失败不影响其他镜像继续跑
+      fail-fast: false
+      # 免费账号并发上限 20，留点余量；也避免同时把 ACR 打满
+      max-parallel: 6
+      matrix:
+        entry: ${{ fromJson(needs.prepare.outputs.images) }}
+    name: ${{ matrix.entry }}
+    steps:
       - name: 安装 skopeo
         run: |
           sudo apt-get update -qq
           sudo apt-get install -y -qq skopeo
 
-      # Docker Hub 匿名拉取限额是 100 次 / 6 小时 / IP，
-      # 而 GitHub runner 的出口 IP 是共享的，很容易撞上限额。
-      # 配了 DOCKERHUB_* 就能提到 200 次 / 6 小时。可选但强烈建议。
+      # Docker Hub 匿名拉取限额 100 次 / 6 小时 / IP，而 runner 出口 IP 是共享的。
+      # 并行 6 个 job 更容易撞上限额，配了凭证能提到 200 次 / 6 小时。
       - name: 登录 Docker Hub（可选，提高限额）
         env:
           DH_USER:  ${{ secrets.DOCKERHUB_USERNAME }}
@@ -65,70 +109,49 @@ jobs:
           ACR_REGISTRY:  ${{ vars.ACR_REGISTRY }}
           ACR_NAMESPACE: ${{ vars.ACR_NAMESPACE }}
           ACR_REPO:      ${{ vars.ACR_REPO }}
-          ONLY_IMAGE:    ${{ github.event.inputs.image }}
+          ENTRY:         ${{ matrix.entry }}
         run: |
-          # 不用 -e：单个镜像失败不应该中断整批，最后统一汇报
           set -uo pipefail
 
-          # 手动触发且填了镜像名 → 只同步这一个；否则读 images.txt
-          if [ -n "${ONLY_IMAGE}" ]; then
-            LIST="${ONLY_IMAGE}"
+          # 一行可能是 "源镜像" 或 "源镜像 自定义tag"
+          SRC=$(printf '%s' "${ENTRY}" | awk '{print $1}')
+          DST=$(printf '%s' "${ENTRY}" | awk '{print $2}')
+
+          # ⚠️ ACR 个人版仓库数量有上限，所有镜像共用一个仓库，靠 tag 区分。
+          # 没写第二列时，tag = 源镜像去掉 registry/org 前缀后，冒号换成短横线：
+          #   mysql:8.4                                    → mysql-8.4
+          #   nginx                                        → nginx-latest
+          #   apache/rocketmq:5.3.1                        → rocketmq-5.3.1
+          #   docker.elastic.co/elasticsearch/es:8.15.3    → es-8.15.3
+          if [ -z "${DST}" ]; then
+            BASE="${SRC##*/}"
+            case "${BASE}" in
+              *:*) DST="${BASE%%:*}-${BASE##*:}" ;;
+              *)   DST="${BASE}-latest"          ;;
+            esac
+          fi
+          # tag 只允许 [a-zA-Z0-9._-]，把可能残留的 / 和 : 换成 -
+          DST=$(printf '%s' "${DST}" | tr '/:' '--')
+
+          TARGET="${ACR_REGISTRY}/${ACR_NAMESPACE}/${ACR_REPO}:${DST}"
+          echo "同步：${SRC}  ->  ${TARGET}"
+
+          # --retry-times 3   跨境推送偶发中断，自动重试
+          # 不加 --all        只同步 runner 平台（amd64）那一个 manifest，
+          #                   和家里节点架构一致，省时间也省 ACR 空间
+          if skopeo copy --retry-times 3 "docker://${SRC}" "docker://${TARGET}"; then
+            {
+              echo "### ✅ ${SRC}"
+              echo ""
+              echo '```bash'
+              echo "sudo crictl pull ${TARGET}"
+              echo '```'
+            } >> "$GITHUB_STEP_SUMMARY"
           else
-            # 去掉注释行和空行
-            LIST=$(grep -vE '^[[:space:]]*(#|$)' images.txt || true)
+            {
+              echo "### ❌ ${SRC}"
+              echo ""
+              echo "目标：\`${TARGET}\`"
+            } >> "$GITHUB_STEP_SUMMARY"
+            exit 1
           fi
-
-          if [ -z "${LIST}" ]; then
-            echo "images.txt 里没有任何镜像，退出"
-            exit 0
-          fi
-
-          FAILED=0
-          echo "## 同步结果" >> "$GITHUB_STEP_SUMMARY"
-          echo "" >> "$GITHUB_STEP_SUMMARY"
-          echo "| 源镜像 | 目标地址 | 结果 |" >> "$GITHUB_STEP_SUMMARY"
-          echo "|---|---|---|" >> "$GITHUB_STEP_SUMMARY"
-
-          while read -r SRC DST; do
-            [ -z "${SRC}" ] && continue
-
-            # ⚠️ ACR 个人版只能建 3 个仓库，所有镜像共用一个仓库，靠 tag 区分。
-            # 没写第二列时，tag = 源镜像去掉 registry/org 前缀后，把冒号换成短横线：
-            #   mysql:8.4                                 → mysql-8.4
-            #   nginx                                     → nginx-latest
-            #   rancher/local-path-provisioner:v0.0.37    → local-path-provisioner-v0.0.37
-            #   registry.k8s.io/coredns/coredns:v1.14.2   → coredns-v1.14.2
-            if [ -z "${DST:-}" ]; then
-              BASE="${SRC##*/}"              # 只留最后一段：mysql:8.4
-              case "${BASE}" in
-                *:*) DST="${BASE%%:*}-${BASE##*:}" ;;   # 有 tag：mysql:8.4 → mysql-8.4
-                *)   DST="${BASE}-latest"      ;;       # 没写 tag，源端默认 latest
-              esac
-            fi
-            # tag 只允许 [a-zA-Z0-9._-]，把可能残留的 / 和 : 统一换成 -
-            DST=$(printf '%s' "${DST}" | tr '/:' '--')
-
-            TARGET="${ACR_REGISTRY}/${ACR_NAMESPACE}/${ACR_REPO}:${DST}"
-
-            echo "::group::${SRC}  ->  ${TARGET}"
-            # --retry-times 3   跨境推送偶发中断，自动重试
-            # 不加 --all        只同步 runner 平台（amd64）的那一个 manifest，
-            #                   和家里节点架构一致，省时间也省 ACR 空间
-            if skopeo copy --retry-times 3 \
-                 "docker://${SRC}" "docker://${TARGET}"; then
-              echo "| \`${SRC}\` | \`${TARGET}\` | ✅ |" >> "$GITHUB_STEP_SUMMARY"
-            else
-              echo "::error::同步失败: ${SRC}"
-              echo "| \`${SRC}\` | \`${TARGET}\` | ❌ |" >> "$GITHUB_STEP_SUMMARY"
-              FAILED=1
-            fi
-            echo "::endgroup::"
-          done <<< "${LIST}"
-
-          echo "" >> "$GITHUB_STEP_SUMMARY"
-          echo "家里节点拉取示例：" >> "$GITHUB_STEP_SUMMARY"
-          echo '```bash' >> "$GITHUB_STEP_SUMMARY"
-          echo "sudo crictl pull ${ACR_REGISTRY}/${ACR_NAMESPACE}/${ACR_REPO}:<tag>" >> "$GITHUB_STEP_SUMMARY"
-          echo '```' >> "$GITHUB_STEP_SUMMARY"
-
-          exit ${FAILED}

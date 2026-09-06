@@ -1,35 +1,44 @@
 # 需要同步到 ACR 的镜像清单
 #
-# ⚠️ ACR 个人版最多 3 个仓库，所以所有镜像共用一个仓库，靠 tag 区分。
+# ⚠️ ACR 个人版仓库数量有上限，所有镜像共用一个仓库，靠 tag 区分。
 #
 # 格式：
-#   <源镜像>                  tag 自动推导：去掉 registry/org 前缀，冒号换成短横线
-#   <源镜像>  <自定义tag>      需要自己定 tag 时写第二列
+#   <源镜像>                 tag 自动推导：去掉 registry/org 前缀，冒号换短横线
+#   <源镜像>  <自定义tag>     需要自己定 tag 时写第二列
 #
-# 自动推导示例：
+# 推导示例：
 #   mysql:8.4                                → 仓库:mysql-8.4
-#   nginx                                    → 仓库:nginx-latest
-#   rancher/local-path-provisioner:v0.0.37   → 仓库:local-path-provisioner-v0.0.37
+#   apache/rocketmq:5.3.1                    → 仓库:rocketmq-5.3.1
+#   docker.elastic.co/.../elasticsearch:8.x  → 仓库:elasticsearch-8.x
 #
-# 改完这个文件 push 上去，Actions 会自动同步。# 开头的行和空行会被忽略。
+# 每个镜像是一个独立的并行 job，加多少都不会互相拖慢。
+# 改完 push 上去自动触发。# 开头的行和空行会被忽略。
 
-# ⚠️ 跨境推送每个镜像约十几分钟，而 job 超时是 60 分钟。
-#    一次别放太多，超过 3~4 个就分批提交。
-
-# ---- 加速器拉不到、必须走这里的 ----
+# ---- 数据库 ----
 mysql:8.4
+mongo:7.0
 
-# ---- 中间件 ----
-redis:7
+# ---- 缓存 ----
+redis:7.4
+
+# ---- 注册配置中心 ----
 nacos/nacos-server:v2.4.3
 
-# ---- 下一批再放开（JDK 镜像较大，单独跑一次）----
-# eclipse-temurin:21-jdk
-# eclipse-temurin:21-jre
-# rabbitmq:3.13-management
+# ---- 消息队列 ----
+apache/rocketmq:5.3.1
+apacherocketmq/rocketmq-dashboard:1.0.0
+rabbitmq:3.13-management
 
-# ---- k8s 生态 ----
+# ---- 搜索 ----
+docker.elastic.co/elasticsearch/elasticsearch:8.15.3
+
+# ---- 限流熔断 ----
+bladex/sentinel-dashboard:1.8.8
+
+# ---- Java 运行时 ----
+eclipse-temurin:21-jdk
+eclipse-temurin:21-jre
+
+# ---- 可选，需要时取消注释 ----
+# docker.elastic.co/kibana/kibana:8.15.3
 # rancher/local-path-provisioner:v0.0.37
-
-# ---- 示例：自定义 tag ----
-# registry.k8s.io/metrics-server/metrics-server:v0.7.2   metrics-server-v0.7.2
