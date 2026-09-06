@@ -1,0 +1,123 @@
+# 把 Docker Hub / registry.k8s.io / ghcr.io 上的镜像同步到自己的阿里云 ACR
+#
+# 为什么需要它：
+#   阿里云的镜像加速器只覆盖 Docker Hub 的一个子集（mysql:8.4、eclipse-temurin 等都没有）。
+#   GitHub 的 runner 直连 Docker Hub，没有覆盖问题，是唯一能同步任意镜像的办法。
+name: sync-images
+
+on:
+  # ① 改了 images.txt 就自动跑
+  push:
+    paths:
+      - 'images.txt'
+      - '.github/workflows/sync-images.yml'
+  # ② 也可以在 Actions 页面手动触发，临时同步单个镜像
+  workflow_dispatch:
+    inputs:
+      image:
+        description: '只同步这一个镜像（留空 = 同步 images.txt 全部）'
+        required: false
+        default: ''
+
+# 同一时间只跑一个，避免两次 push 撞车重复推送
+concurrency:
+  group: sync-images
+  cancel-in-progress: false
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # skopeo 不预装在 runner 上，需要自己装（约 15 秒）
+      # 用 skopeo 而不是 docker：它直接搬运 blob，不需要先解压到本地磁盘，快很多
+      - name: 安装 skopeo
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq skopeo
+
+      # Docker Hub 匿名拉取限额是 100 次 / 6 小时 / IP，
+      # 而 GitHub runner 的出口 IP 是共享的，很容易撞上限额。
+      # 配了 DOCKERHUB_* 就能提到 200 次 / 6 小时。可选但强烈建议。
+      - name: 登录 Docker Hub（可选，提高限额）
+        env:
+          DH_USER:  ${{ secrets.DOCKERHUB_USERNAME }}
+          DH_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
+        run: |
+          # secrets 不能直接用在 step 的 if: 条件里，先取到环境变量再判断
+          if [ -n "${DH_USER}" ]; then
+            skopeo login docker.io -u "${DH_USER}" -p "${DH_TOKEN}"
+          else
+            echo "未配置 DOCKERHUB_USERNAME，匿名拉取（限额 100 次/6 小时）"
+          fi
+
+      - name: 登录 ACR
+        run: |
+          skopeo login "${{ vars.ACR_REGISTRY }}" \
+            -u "${{ secrets.ACR_USERNAME }}" \
+            -p "${{ secrets.ACR_PASSWORD }}"
+
+      - name: 同步
+        env:
+          ACR_REGISTRY:  ${{ vars.ACR_REGISTRY }}
+          ACR_NAMESPACE: ${{ vars.ACR_NAMESPACE }}
+          ONLY_IMAGE:    ${{ github.event.inputs.image }}
+        run: |
+          # 不用 -e：单个镜像失败不应该中断整批，最后统一汇报
+          set -uo pipefail
+
+          # 手动触发且填了镜像名 → 只同步这一个；否则读 images.txt
+          if [ -n "${ONLY_IMAGE}" ]; then
+            LIST="${ONLY_IMAGE}"
+          else
+            # 去掉注释行和空行
+            LIST=$(grep -vE '^[[:space:]]*(#|$)' images.txt || true)
+          fi
+
+          if [ -z "${LIST}" ]; then
+            echo "images.txt 里没有任何镜像，退出"
+            exit 0
+          fi
+
+          FAILED=0
+          echo "## 同步结果" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "| 源镜像 | 目标地址 | 结果 |" >> "$GITHUB_STEP_SUMMARY"
+          echo "|---|---|---|" >> "$GITHUB_STEP_SUMMARY"
+
+          while read -r SRC DST; do
+            [ -z "${SRC}" ] && continue
+
+            # 没写第二列时，目标名 = 源镜像去掉 registry 和 org 前缀
+            #   nginx:latest                              → nginx:latest
+            #   rancher/local-path-provisioner:v0.0.37    → local-path-provisioner:v0.0.37
+            #   registry.k8s.io/coredns/coredns:v1.14.2   → coredns:v1.14.2
+            if [ -z "${DST:-}" ]; then
+              DST="${SRC##*/}"
+            fi
+
+            TARGET="${ACR_REGISTRY}/${ACR_NAMESPACE}/${DST}"
+
+            echo "::group::${SRC}  ->  ${TARGET}"
+            # --retry-times 3   跨境推送偶发中断，自动重试
+            # 不加 --all        只同步 runner 平台（amd64）的那一个 manifest，
+            #                   和家里节点架构一致，省时间也省 ACR 空间
+            if skopeo copy --retry-times 3 \
+                 "docker://${SRC}" "docker://${TARGET}"; then
+              echo "| \`${SRC}\` | \`${TARGET}\` | ✅ |" >> "$GITHUB_STEP_SUMMARY"
+            else
+              echo "::error::同步失败: ${SRC}"
+              echo "| \`${SRC}\` | \`${TARGET}\` | ❌ |" >> "$GITHUB_STEP_SUMMARY"
+              FAILED=1
+            fi
+            echo "::endgroup::"
+          done <<< "${LIST}"
+
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "家里节点拉取示例：" >> "$GITHUB_STEP_SUMMARY"
+          echo '```bash' >> "$GITHUB_STEP_SUMMARY"
+          echo "sudo crictl pull ${ACR_REGISTRY}/${ACR_NAMESPACE}/<镜像名>:<tag>" >> "$GITHUB_STEP_SUMMARY"
+          echo '```' >> "$GITHUB_STEP_SUMMARY"
+
+          exit ${FAILED}
