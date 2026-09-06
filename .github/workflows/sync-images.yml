@@ -27,8 +27,10 @@ concurrency:
 jobs:
   sync:
     runs-on: ubuntu-latest
+    # 跨境推送慢，但真卡死时不该空跑 6 小时（GitHub 默认上限）
+    timeout-minutes: 60
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       # skopeo 不预装在 runner 上，需要自己装（约 15 秒）
       # 用 skopeo 而不是 docker：它直接搬运 blob，不需要先解压到本地磁盘，快很多
@@ -62,6 +64,7 @@ jobs:
         env:
           ACR_REGISTRY:  ${{ vars.ACR_REGISTRY }}
           ACR_NAMESPACE: ${{ vars.ACR_NAMESPACE }}
+          ACR_REPO:      ${{ vars.ACR_REPO }}
           ONLY_IMAGE:    ${{ github.event.inputs.image }}
         run: |
           # 不用 -e：单个镜像失败不应该中断整批，最后统一汇报
@@ -89,15 +92,23 @@ jobs:
           while read -r SRC DST; do
             [ -z "${SRC}" ] && continue
 
-            # 没写第二列时，目标名 = 源镜像去掉 registry 和 org 前缀
-            #   nginx:latest                              → nginx:latest
-            #   rancher/local-path-provisioner:v0.0.37    → local-path-provisioner:v0.0.37
-            #   registry.k8s.io/coredns/coredns:v1.14.2   → coredns:v1.14.2
+            # ⚠️ ACR 个人版只能建 3 个仓库，所有镜像共用一个仓库，靠 tag 区分。
+            # 没写第二列时，tag = 源镜像去掉 registry/org 前缀后，把冒号换成短横线：
+            #   mysql:8.4                                 → mysql-8.4
+            #   nginx                                     → nginx-latest
+            #   rancher/local-path-provisioner:v0.0.37    → local-path-provisioner-v0.0.37
+            #   registry.k8s.io/coredns/coredns:v1.14.2   → coredns-v1.14.2
             if [ -z "${DST:-}" ]; then
-              DST="${SRC##*/}"
+              BASE="${SRC##*/}"              # 只留最后一段：mysql:8.4
+              case "${BASE}" in
+                *:*) DST="${BASE%%:*}-${BASE##*:}" ;;   # 有 tag：mysql:8.4 → mysql-8.4
+                *)   DST="${BASE}-latest"      ;;       # 没写 tag，源端默认 latest
+              esac
             fi
+            # tag 只允许 [a-zA-Z0-9._-]，把可能残留的 / 和 : 统一换成 -
+            DST=$(printf '%s' "${DST}" | tr '/:' '--')
 
-            TARGET="${ACR_REGISTRY}/${ACR_NAMESPACE}/${DST}"
+            TARGET="${ACR_REGISTRY}/${ACR_NAMESPACE}/${ACR_REPO}:${DST}"
 
             echo "::group::${SRC}  ->  ${TARGET}"
             # --retry-times 3   跨境推送偶发中断，自动重试
@@ -117,7 +128,7 @@ jobs:
           echo "" >> "$GITHUB_STEP_SUMMARY"
           echo "家里节点拉取示例：" >> "$GITHUB_STEP_SUMMARY"
           echo '```bash' >> "$GITHUB_STEP_SUMMARY"
-          echo "sudo crictl pull ${ACR_REGISTRY}/${ACR_NAMESPACE}/<镜像名>:<tag>" >> "$GITHUB_STEP_SUMMARY"
+          echo "sudo crictl pull ${ACR_REGISTRY}/${ACR_NAMESPACE}/${ACR_REPO}:<tag>" >> "$GITHUB_STEP_SUMMARY"
           echo '```' >> "$GITHUB_STEP_SUMMARY"
 
           exit ${FAILED}

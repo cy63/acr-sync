@@ -38,12 +38,15 @@ GitHub 的 runner 直连 Docker Hub，没有覆盖问题，也不经过自己的
 
 仓库 → Settings → Secrets and variables → Actions → **Variables** 标签 → New variable
 
-| 名称 | 值 |
-|---|---|
-| `ACR_REGISTRY` | `crpi-xxxxxxxxxxxx.cn-shanghai.personal.cr.aliyuncs.com` |
-| `ACR_NAMESPACE` | `你的命名空间` |
+| 名称 | 值 | 说明 |
+|---|---|---|
+| `ACR_REGISTRY` | `crpi-xxxxxxxxxxxx.cn-shanghai.personal.cr.aliyuncs.com` | **公网地址**，不带 `-vpc` —— runner 在阿里云外面，走不了内网 |
+| `ACR_NAMESPACE` | `你的命名空间` | |
+| `ACR_REPO` | `你的仓库名` | 所有镜像共用这一个仓库 |
 
-> 用**公网地址**（不带 `-vpc`）—— GitHub 的 runner 在阿里云外面，走不了内网。
+> ⚠️ **为什么所有镜像挤在一个仓库里**：ACR 个人版的仓库数量有上限（本例是 3 个），
+> 不够一个镜像一个仓库。所以改成**单仓库 + tag 区分**：
+> `mysql:8.4` 同步后是 `<仓库>:mysql-8.4`。
 
 ## 三、配置 Secrets（敏感，加密存储）
 
@@ -79,17 +82,24 @@ nacos/nacos-server:v2.4.3
 
 push 上去，Actions 自动跑。目标名默认是源镜像去掉 registry 和 org 前缀：
 
+tag 自动推导：**去掉 registry / org 前缀，冒号换成短横线**。
+
 | 写法 | 同步后的地址 |
 |---|---|
-| `nginx:latest` | `<ACR>/<NS>/nginx:latest` |
-| `rancher/local-path-provisioner:v0.0.37` | `<ACR>/<NS>/local-path-provisioner:v0.0.37` |
-| `registry.k8s.io/coredns/coredns:v1.14.2` | `<ACR>/<NS>/coredns:v1.14.2` |
+| `mysql:8.4` | `<ACR>/<NS>/<REPO>:mysql-8.4` |
+| `nginx` | `<ACR>/<NS>/<REPO>:nginx-latest` |
+| `rancher/local-path-provisioner:v0.0.37` | `<ACR>/<NS>/<REPO>:local-path-provisioner-v0.0.37` |
+| `registry.k8s.io/coredns/coredns:v1.14.2` | `<ACR>/<NS>/<REPO>:coredns-v1.14.2` |
 
-需要改名时写第二列：
+需要自己定 tag 时写第二列：
 
 ```
-registry.k8s.io/metrics-server/metrics-server:v0.7.2   metrics-server:v0.7.2
+registry.k8s.io/metrics-server/metrics-server:v0.7.2   metrics-server-v0.7.2
 ```
+
+> ⚠️ **代价**：镜像原本的版本号被塞进了 tag 里，同一镜像的多个版本会并列成
+> `mysql-8.4`、`mysql-8.0`……看着不如 Docker Hub 的结构清楚。
+> 这是仓库数量受限下的妥协，不是推荐做法。
 
 ### 单个：手动触发
 
@@ -106,7 +116,7 @@ Actions 的运行页面底部有个 **Summary** 表格，列出每个镜像的�
 ## 五、家里节点拉取
 
 ```bash
-sudo crictl pull crpi-xxxxxxxxxxxx.cn-shanghai.personal.cr.aliyuncs.com/你的命名空间/mysql:8.4
+sudo crictl pull crpi-xxxxxxxxxxxx.cn-shanghai.personal.cr.aliyuncs.com/你的命名空间/你的仓库:mysql-8.4
 ```
 
 k8s 里直接写这个地址：
@@ -115,7 +125,7 @@ k8s 里直接写这个地址：
 spec:
   containers:
     - name: app
-      image: crpi-xxxxxxxxxxxx.cn-shanghai.personal.cr.aliyuncs.com/你的命名空间/mysql:8.4
+      image: crpi-xxxxxxxxxxxx.cn-shanghai.personal.cr.aliyuncs.com/你的命名空间/你的仓库:mysql-8.4
 ```
 
 > 私有仓库需要 `imagePullSecrets`，配置见本地文档第 6 章。
@@ -150,4 +160,5 @@ skopeo 会比对 digest，已存在的层直接跳过。images.txt 里的老镜�
 
 **⑤ ACR 个人版额度**
 
-3 个命名空间、300 个仓库。一个镜像一个仓库的话，300 个足够家庭实验室用很久。
+命名空间和仓库数量都有上限（实测仓库上限为 3）。这就是本流水线采用
+**单仓库 + tag 区分** 的原因。tag 数量没有限制，够用。

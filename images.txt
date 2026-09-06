@@ -1,11 +1,17 @@
 # 需要同步到 ACR 的镜像清单
 #
-# 格式：
-#   <源镜像>                    目标名自动推导（去掉 registry 和 org 前缀）
-#   <源镜像>  <目标名:tag>      需要改名时写第二列
+# ⚠️ ACR 个人版最多 3 个仓库，所以所有镜像共用一个仓库，靠 tag 区分。
 #
-# 改完这个文件 push 上去，Actions 会自动同步。
-# # 开头的行和空行会被忽略。
+# 格式：
+#   <源镜像>                  tag 自动推导：去掉 registry/org 前缀，冒号换成短横线
+#   <源镜像>  <自定义tag>      需要自己定 tag 时写第二列
+#
+# 自动推导示例：
+#   mysql:8.4                                → 仓库:mysql-8.4
+#   nginx                                    → 仓库:nginx-latest
+#   rancher/local-path-provisioner:v0.0.37   → 仓库:local-path-provisioner-v0.0.37
+#
+# 改完这个文件 push 上去，Actions 会自动同步。# 开头的行和空行会被忽略。
 
 # ---- 加速器拉不到、必须走这里的 ----
 mysql:8.4
@@ -20,5 +26,5 @@ rabbitmq:3.13-management
 # ---- k8s 生态 ----
 rancher/local-path-provisioner:v0.0.37
 
-# ---- 示例：改名 ----
-# registry.k8s.io/metrics-server/metrics-server:v0.7.2   metrics-server:v0.7.2
+# ---- 示例：自定义 tag ----
+# registry.k8s.io/metrics-server/metrics-server:v0.7.2   metrics-server-v0.7.2
