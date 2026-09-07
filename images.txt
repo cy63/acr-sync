@@ -39,6 +39,16 @@ flink:2.3.0-scala_2.12-java21
 # 备选：Flink 1.20 连接器生态更成熟，但运行时是 Java 17
 flink:1.20.1-scala_2.12-java17
 
+# ---- 对象存储 ----
+# Flink checkpoint 需要「所有 TaskManager 和 JobManager 都能访问的共享存储」，
+# 而 local-path 是节点本地的 ReadWriteOnce，做不到。MinIO 提供 S3 兼容端点补上这块。
+# ⚠️ 社区版已移除 Web 控制台的管理功能，只剩对象浏览器；
+#    建桶、建账号、配策略都要用 mc 命令行
+minio/minio:RELEASE.2025-09-07T16-13-09Z    minio-2025-09-07
+# mc 是 MinIO 的命令行客户端，用一次性 Job 跑来建桶。
+# 这里用 latest 是例外 —— 它只在初始化时跑一次，不常驻，版本漂移无影响
+minio/mc:latest
+
 # ---- 搜索 ----
 docker.elastic.co/elasticsearch/elasticsearch:8.15.3
 
