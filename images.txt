@@ -47,11 +47,17 @@ bladex/sentinel-dashboard:1.8.8
 
 # ---- 监控 ----
 # Spring Boot 侧用 Micrometer 暴露 /actuator/prometheus，这边负责抓取和展示。
-# 如果之后上 kube-prometheus-stack（operator + alertmanager + node-exporter +
-# kube-state-metrics），那些镜像的版本必须和 Helm chart 对齐，
-# 用 helm template 导出实际列表再补进来，不要凭空写版本号。
+# 采用「独立 Prometheus + kubernetes_sd_configs」而不是 kube-prometheus-stack：
+# 后者要额外同步 6 个镜像且版本必须和 Helm chart 严格对齐，
+# 而 Prometheus 原生的 k8s 服务发现已经够用，配置也更透明。
 prom/prometheus:v3.14.0
 grafana/grafana:13.2.1
+# 节点级指标：CPU / 内存 / 磁盘 / 网络。以 DaemonSet 跑在每个节点上。
+# ⚠️ 「磁盘剩余空间」这个指标只有它能提供 —— 而这正是本项目最需要的告警：
+#    local-path 不强制容量，磁盘写满会让节点 NotReady
+prom/node-exporter:v1.12.1
+# k8s 对象状态：Pod 重启次数、Deployment 副本数、PVC 容量、节点 Ready 状态
+registry.k8s.io/kube-state-metrics/kube-state-metrics:v2.20.0
 
 # ---- Java 运行时 ----
 eclipse-temurin:21-jdk
