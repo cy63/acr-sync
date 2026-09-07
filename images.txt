@@ -45,6 +45,14 @@ docker.elastic.co/elasticsearch/elasticsearch:8.15.3
 # ---- 限流熔断 ----
 bladex/sentinel-dashboard:1.8.8
 
+# ---- 监控 ----
+# Spring Boot 侧用 Micrometer 暴露 /actuator/prometheus，这边负责抓取和展示。
+# 如果之后上 kube-prometheus-stack（operator + alertmanager + node-exporter +
+# kube-state-metrics），那些镜像的版本必须和 Helm chart 对齐，
+# 用 helm template 导出实际列表再补进来，不要凭空写版本号。
+prom/prometheus:v3.14.0
+grafana/grafana:13.2.1
+
 # ---- Java 运行时 ----
 eclipse-temurin:21-jdk
 eclipse-temurin:21-jre
@@ -55,8 +63,9 @@ jenkins/jenkins:2.568.3-lts-jdk21
 # 动态构建节点，Kubernetes 插件按需拉起。原 tag 太长，第二列自定义一个短的
 jenkins/inbound-agent:3391.va_37fa_a_305d6d-1-jdk21   inbound-agent-jdk21
 # 构建 Java 项目用。maven 官方镜像就是 Apache Maven，Docker Hub 上没有 apache/maven
-# Maven 4 目前仍是 RC（4.0.0-rc-5），生产用 3.9.x
-maven:3.9.16-eclipse-temurin-21
+# Maven 4 目前仍是 RC（4.0.0-rc-5）。官方镜像没有 3.8.9，3.8 线最新是 3.8.8
+# 且无 temurin-21 变体，故用 3.9.9（对 3.8 的构建向后兼容）
+maven:3.9.9-eclipse-temurin-21
 # 在 k8s 里构建镜像。containerd 没有 docker socket，
 # kaniko 已停止维护，用 buildkit
 moby/buildkit:v0.18.2-rootless
