@@ -39,6 +39,14 @@ flink:2.3.0-scala_2.12-java21
 # 备选：Flink 1.20 连接器生态更成熟，但运行时是 Java 17
 flink:1.20.1-scala_2.12-java17
 
+# ---- 私有镜像仓库 ----
+# 自建 registry，给 Jenkins 构建的应用镜像用。
+# 为什么不推 ACR：实测家宽上行只有 4.73 Mbit/s（约 590 KB/s），
+# 一个 300MB 的 Spring Boot 镜像推上去要 8.5 分钟；推局域网只要几秒。
+# ⚠️ registry 3.x 是 CNCF distribution，配置文件路径从 2.x 的
+#    /etc/docker/registry/config.yml 改成了 /etc/distribution/config.yml
+registry:3.1.1
+
 # ---- 对象存储 ----
 # Flink checkpoint 需要「所有 TaskManager 和 JobManager 都能访问的共享存储」，
 # 而 local-path 是节点本地的 ReadWriteOnce，做不到。MinIO 提供 S3 兼容端点补上这块。
