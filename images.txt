@@ -97,3 +97,9 @@ moby/buildkit:v0.18.2-rootless
 # ---- 可选，需要时取消注释 ----
 # docker.elastic.co/kibana/kibana:8.15.3
 # rancher/local-path-provisioner:v0.0.37
+
+# ---- 部署工具 ----
+# Jenkins 流水线里执行 kubectl set image / rollout status。
+# ⚠️ 不能用 registry.k8s.io/kubectl —— 那是 distroless 镜像，没有 shell，
+#    Jenkins 的 Kubernetes 插件需要往容器里注入命令，容器必须能跑 sh 且常驻
+alpine/kubectl:1.36.4
