@@ -64,6 +64,13 @@ docker.elastic.co/elasticsearch/elasticsearch:8.15.3
 # ⚠️ 版本必须和 ES 严格对齐（8.15.3 对 8.15.3）——
 #    Kibana 拒绝连接大版本不一致的 ES，小版本超前也会告警。
 docker.elastic.co/kibana/kibana:8.15.3
+# 日志采集。以 DaemonSet 跑在每个节点上，读 /var/log/pods 里的容器 stdout。
+# ⚠️ 业务服务【不需要改任何配置】—— 那个目录是 kubelet 自动落盘的。
+# ⚠️ 选 Filebeat 而不是更轻的 Fluent Bit，是因为它和 ES/Kibana 同厂同版本：
+#    自带 MySQL / Redis / Kafka / Nginx 的解析 module 和现成的 Kibana 仪表盘，
+#    而 Fluent Bit 每种中间件都要自己写正则。内存差 100MB × 3 节点，值。
+# ⚠️ 版本同样要和 ES 对齐。
+docker.elastic.co/beats/filebeat:8.15.3
 
 # ---- 限流熔断 ----
 bladex/sentinel-dashboard:1.8.8
