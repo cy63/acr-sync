@@ -59,6 +59,11 @@ minio/mc:latest
 
 # ---- 搜索 ----
 docker.elastic.co/elasticsearch/elasticsearch:8.15.3
+# ES 的查询界面。SkyWalking UI 只能按 service + 时间 + 关键字粗查，
+# 全文检索、聚合分析、做 dashboard 还是要 Kibana。
+# ⚠️ 版本必须和 ES 严格对齐（8.15.3 对 8.15.3）——
+#    Kibana 拒绝连接大版本不一致的 ES，小版本超前也会告警。
+docker.elastic.co/kibana/kibana:8.15.3
 
 # ---- 限流熔断 ----
 bladex/sentinel-dashboard:1.8.8
@@ -76,6 +81,22 @@ grafana/grafana:13.2.1
 prom/node-exporter:v1.12.1
 # k8s 对象状态：Pod 重启次数、Deployment 副本数、PVC 容量、节点 Ready 状态
 registry.k8s.io/kube-state-metrics/kube-state-metrics:v2.20.0
+
+# ---- 链路追踪（SkyWalking）----
+# OAP 是后端（接收 + 分析 + 存储），UI 是前端，两个是分开的镜像。
+# ⚠️ 存储用现有的 ES 8.15.3 —— 官方支持 ES 7.x / 8.x / 9.x。
+#    OAP 10.x 的默认存储已经改成 BanyanDB，用 ES 要显式设 SW_STORAGE=elasticsearch。
+apache/skywalking-oap-server:10.1.0
+apache/skywalking-ui:10.1.0
+# Java 探针。⚠️ 这个镜像【不是拿来跑服务的】—— 它只是个装着 agent jar 的容器，
+#    用法是在业务 Pod 里当 initContainer，把 /skywalking/agent 拷到 emptyDir，
+#    业务容器挂载同一个 emptyDir 并用 -javaagent 加载。
+#    这样【16 个业务镜像一个都不用重建】。
+# ⚠️ 必须选 java21 变体 —— 业务镜像是 eclipse-temurin-21-jre，
+#    agent 的字节码增强要和目标 JVM 版本匹配。
+# ⚠️ agent 版本号（9.6.0）和 OAP 版本号（10.1.0）【不是一套】，
+#    SkyWalking 的 Java agent 是独立仓库独立发版，别看到对不上就以为拿错了。
+apache/skywalking-java-agent:9.6.0-java21
 
 # ---- Java 运行时 ----
 eclipse-temurin:21-jdk
@@ -95,7 +116,6 @@ maven:3.9.9-eclipse-temurin-21
 moby/buildkit:v0.18.2-rootless
 
 # ---- 可选，需要时取消注释 ----
-# docker.elastic.co/kibana/kibana:8.15.3
 # rancher/local-path-provisioner:v0.0.37
 
 # ---- 部署工具 ----
