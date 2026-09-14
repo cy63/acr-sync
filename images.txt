@@ -105,6 +105,23 @@ apache/skywalking-ui:10.1.0
 #    SkyWalking 的 Java agent 是独立仓库独立发版，别看到对不上就以为拿错了。
 apache/skywalking-java-agent:9.6.0-java21
 
+# ---- 前端 ----
+# 两个前端（front/admin 运营平台、front/merchant 商户平台）的运行时。
+# 产物是 Umi 打出来的静态文件，用 nginx 托管 + 反代 /api 到网关。
+# ⚠️ 固定小版本，不用 nginx:alpine 这种浮动标签 ——
+#    浮动标签同步两次可能是两个不同的镜像，而节点上已缓存的旧镜像不会更新，
+#    最后三个节点跑三个版本，kubectl describe 还看不出来，得比 digest 才发现
+nginx:1.27-alpine
+# 前端构建环境（Jenkins Agent 里的 node 容器用）。
+# ⚠️ 用 bookworm（Debian）不用 alpine，是刻意的：alpine 是 musl libc，
+#    遇到只发 glibc 预编译产物的原生模块会退回 node-gyp 现场编译，
+#    而 alpine 上没有 python/make/g++ —— 报错是一长串 gyp ERR!，
+#    真正的根因（缺编译工具）埋在最下面几行。
+#    构建镜像不进生产，体积大一点无所谓，换的是「不会突然编不过」。
+# ⚠️ 两个项目都是 @umijs/max 4.x，要求 Node >= 18。
+#    admin 的 package.json 里写着 "node": ">=12.0.0"，那是脚手架留下的，别信
+node:22-bookworm
+
 # ---- Java 运行时 ----
 eclipse-temurin:21-jdk
 eclipse-temurin:21-jre
