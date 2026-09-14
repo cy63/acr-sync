@@ -52,10 +52,29 @@ registry:3.1.1
 # 而 local-path 是节点本地的 ReadWriteOnce，做不到。MinIO 提供 S3 兼容端点补上这块。
 # ⚠️ 社区版已移除 Web 控制台的管理功能，只剩对象浏览器；
 #    建桶、建账号、配策略都要用 mc 命令行
-minio/minio:RELEASE.2025-09-07T16-13-09Z    minio-2025-09-07
+# ⚠️⚠️ 来源是 quay.io 【不是 Docker Hub】—— 2026-09-14 改的，别改回去。
+#
+#    Docker Hub 上 minio 的镜像仓库【整个没了】，不是某个 tag 被删：
+#      hub.docker.com/v2/repositories/minio/minio/  -> 404
+#      hub.docker.com/v2/repositories/minio/mc/     -> 404
+#      hub.docker.com/v2/repositories/library/nginx/-> 200（对照组，说明查法没问题）
+#
+#    同步时报的是：
+#      reading manifest RELEASE.2025-09-07T16-13-09Z in docker.io/minio/minio:
+#      requested access to the resource is denied
+#    ⚠️ 注意它说的是 denied 不是 not found —— Docker Hub 对不存在的仓库
+#       经常返回 401/denied，很容易被当成「凭证过期」或「限额用光」去查，
+#       方向完全错。
+#
+#    quay.io 上版本和 tag 都原封不动，所以只换来源，【镜像内容不变】。
+#    ⚠️ ACR 那边的 tag 也完全没变（minio-2025-09-07 / mc-latest），
+#       所以 k8s 清单一个字都不用改，MinIO 不需要重新部署。
+quay.io/minio/minio:RELEASE.2025-09-07T16-13-09Z    minio-2025-09-07
 # mc 是 MinIO 的命令行客户端，用一次性 Job 跑来建桶。
-# 这里用 latest 是例外 —— 它只在初始化时跑一次，不常驻，版本漂移无影响
-minio/mc:latest
+# 这里用 latest 是例外 —— 它只在初始化时跑一次，不常驻，版本漂移无影响。
+# ⚠️ 派生出的 ACR tag 仍是 mc-latest：工作流取的是 ${SRC##*/}，
+#    也就是 mc:latest，和来源仓库前缀无关
+quay.io/minio/mc:latest
 
 # ---- 搜索 ----
 docker.elastic.co/elasticsearch/elasticsearch:8.15.3
