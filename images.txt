@@ -141,6 +141,16 @@ nginx:1.27-alpine
 #    admin 的 package.json 里写着 "node": ">=12.0.0"，那是脚手架留下的，别信
 node:22-bookworm
 
+# ---- 任务调度 ----
+# XXL-JOB 调度中心。⚠️ 它只调度，不执行任务 —— 真正跑任务的是各业务服务里的
+# 执行器（xxl-job-core），那要改 pom 并重建镜像，见 middleware/xxl-job/README.md。
+# ⚠️ 执行器的 xxl-job-core 版本必须和这里【完全一致】：
+#    调度中心和执行器之间是私有协议，跨大版本（2.x <-> 3.x）不兼容，
+#    表现是注册不上或调度请求被拒。
+# ⚠️ 2.3.x 及更早的 xxl-job-core 用的是 javax.servlet，
+#    在 Spring Boot 3 上直接 ClassNotFoundException。3.x 才是 jakarta。
+xuxueli/xxl-job-admin:3.4.2
+
 # ---- Java 运行时 ----
 eclipse-temurin:21-jdk
 eclipse-temurin:21-jre
